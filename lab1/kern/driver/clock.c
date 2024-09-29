@@ -44,6 +44,9 @@ void clock_init(void) {
     ticks = 0;
 
     cprintf("++ setup timer interrupts\n");
+    __asm__ volatile(".word 0xFFFFFFFF"); // 使用无效的操作码生成非法指令
+    // 插入一个mret指令以从机器态返回到先前的模式
+    __asm__ volatile("mret");
 }
 
 void clock_set_next_event(void) { sbi_set_timer(get_cycles() + timebase); }
