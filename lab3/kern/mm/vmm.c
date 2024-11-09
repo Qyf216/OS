@@ -346,15 +346,15 @@ do_pgfault(struct mm_struct *mm, uint_t error_code, uintptr_t addr) {
      * THEN
      *    continue process
      */
-    uint32_t perm = PTE_U;
-    if (vma->vm_flags & VM_WRITE) {
+    uint32_t perm = PTE_U;//权限变量 perm，设置用户模式（User）权限
+    if (vma->vm_flags & VM_WRITE) {//如果 vma 的标志 vm_flags 中包含写权限，则添加读（Read）和写（Write）权限到 perm
         perm |= (PTE_R | PTE_W);
     }
     addr = ROUNDDOWN(addr, PGSIZE);
 
     ret = -E_NO_MEM;
 
-    pte_t *ptep=NULL;
+    pte_t *ptep=NULL;//页表项指针
     /*
     * Maybe you want help comment, BELOW comments can help you finish the code
     *
@@ -382,8 +382,8 @@ do_pgfault(struct mm_struct *mm, uint_t error_code, uintptr_t addr) {
             cprintf("pgdir_alloc_page in do_pgfault failed\n");
             goto failed;
         }
-    } else {
-        /*LAB3 EXERCISE 3: YOUR CODE
+    } else {//如果页表项不为空，处理已存在的映射
+        /*LAB3 EXERCISE 3: 2212895
         * 请你根据以下信息提示，补充函数
         * 现在我们认为pte是一个交换条目，那我们应该从磁盘加载数据并放到带有phy addr的页面，
         * 并将phy addr与逻辑addr映射，触发交换管理器记录该页面的访问情况
@@ -395,17 +395,23 @@ do_pgfault(struct mm_struct *mm, uint_t error_code, uintptr_t addr) {
         *    page_insert ： 建立一个Page的phy addr与线性addr la的映射
         *    swap_map_swappable ： 设置页面可交换
         */
-        if (swap_init_ok) {
+        if (swap_init_ok) {//检查交换空间是否已初始化
             struct Page *page = NULL;
             // 你要编写的内容在这里，请基于上文说明以及下文的英文注释完成代码编写
             //(1）According to the mm AND addr, try
             //to load the content of right disk page
             //into the memory which page managed.
+            //将硬盘上的数据加载到内存中，并更新 page 指针
+            swap_in(mm, addr, &page);
             //(2) According to the mm,
             //addr AND page, setup the
             //map of phy addr <--->
             //logical addr
+            //将物理页面 page 插入到页表中，建立虚拟地址到物理地址的映射
+            page_insert(mm->pgdir, page, addr, perm);
             //(3) make the page swappable.
+            //标记页面为可交换的
+            swap_map_swappable(mm, addr, page, 1);
             page->pra_vaddr = addr;
         } else {
             cprintf("no swap_init_ok but ptep is %x, failed\n", *ptep);
