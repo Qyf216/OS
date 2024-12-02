@@ -126,23 +126,23 @@ get_proc_name(struct proc_struct *proc) {
 // get_pid - alloc a unique pid for process
 static int
 get_pid(void) {
-    static_assert(MAX_PID > MAX_PROCESS);
+    static_assert(MAX_PID > MAX_PROCESS);//确保 MAX_PID（最大PID值）大于 MAX_PROCESS（最大进程数）
     struct proc_struct *proc;
-    list_entry_t *list = &proc_list, *le;
-    static int next_safe = MAX_PID, last_pid = MAX_PID;
+    list_entry_t *list = &proc_list, *le;//list 指向进程列表的头节点 proc_list，le 用于遍历进程列表
+    static int next_safe = MAX_PID, last_pid = MAX_PID;//记录下一个安全的PID和上一次分配的PID。
     if (++ last_pid >= MAX_PID) {
-        last_pid = 1;
+        last_pid = 1;//如果 last_pid +1达到 MAX_PID，则重置为1,这表示PID是循环使用的，从1到 MAX_PID
         goto inside;
     }
-    if (last_pid >= next_safe) {
+    if (last_pid >= next_safe) {//需要重新计算 next_safe
     inside:
         next_safe = MAX_PID;
     repeat:
         le = list;
-        while ((le = list_next(le)) != list) {
+        while ((le = list_next(le)) != list) {//遍历一个循环链表
             proc = le2proc(le, list_link);
-            if (proc->pid == last_pid) {
-                if (++ last_pid >= next_safe) {
+            if (proc->pid == last_pid) {//如果 proc 的PID等于 last_pid，则说明该PID已被占用
+                if (++ last_pid >= next_safe) {//如果新的 last_pid>=next_safe,更新 next_safe 为 MAX_PID，并重新遍历列表
                     if (last_pid >= MAX_PID) {
                         last_pid = 1;
                     }
@@ -151,7 +151,7 @@ get_pid(void) {
                 }
             }
             else if (proc->pid > last_pid && next_safe > proc->pid) {
-                next_safe = proc->pid;
+                next_safe = proc->pid;//这意味着在 last_pid 和 proc->pid 之间存在未被占用的PID。
             }
         }
     }
@@ -204,6 +204,10 @@ find_proc(int pid) {
     }
     return NULL;
 }
+
+/* fork flags used in do_fork*/
+#define CLONE_VM            0x00000100  // set if VM shared between processes
+#define CLONE_THREAD        0x00000200  // thread group
 
 // kernel_thread - create a kernel thread using "fn" function
 // NOTE: the contents of temp trapframe tf will be copied to 
@@ -266,14 +270,14 @@ copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf) {
  * @tf:          the trapframe info, which will be copied to child process's proc->tf
  */
 int
-do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
-    int ret = -E_NO_FREE_PROC;
+do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {//通过⽗进程来创建⼀个新的⼦进程
+    int ret = -E_NO_FREE_PROC;//初始化为 -E_NO_FREE_PROC，表示没有可用的进程
     struct proc_struct *proc;
     if (nr_process >= MAX_PROCESS) {
-        goto fork_out;
+        goto fork_out;//如果当前进程数量 nr_process 已经达到最大值 MAX_PROCESS，则直接返回
     }
-    ret = -E_NO_MEM;
-    //LAB4:EXERCISE2 YOUR CODE
+    ret = -E_NO_MEM;// 如果内存不⾜，则返回内存错误码
+    //LAB4:EXERCISE2 2212895
     /*
      * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
      * MACROs or Functions:
@@ -291,22 +295,39 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
      *   nr_process:   the number of process set
      */
 
-    //    1. call alloc_proc to allocate a proc_struct
-    //    2. call setup_kstack to allocate a kernel stack for child process
-    //    3. call copy_mm to dup OR share mm according clone_flag
-    //    4. call copy_thread to setup tf & context in proc_struct
-    //    5. insert proc_struct into hash_list && proc_list
-    //    6. call wakeup_proc to make the new child process RUNNABLE
-    //    7. set ret vaule using child proc's pid
-
+    //    1. 分配进程控制块：调用 alloc_proc 函数分配一个新的 proc_struct
+    if ((proc = alloc_proc()) == NULL)
+        goto fork_out;
+    //    2. 分配内核栈：调用 setup_kstack 为子进程分配内核栈
+    proc->parent = current; // 设置⼦进程的⽗进程为当前进程
+    if (setup_kstack(proc))
+        goto bad_fork_cleanup_kstack;
+    //    3. 复制或共享内存管理信息：根据 clone_flags 调用 copy_mm 函数来决定是共享还是复制当前进程的内存管理结构 mm,这个实验中啥都没干
+    if (copy_mm(clone_flags, proc))
+        goto bad_fork_cleanup_proc;
+    //    4. 设置陷阱帧和上下文：调用 copy_thread设置⼦进程的tf和context
+    copy_thread(proc, stack, tf);
+    //    5. 将新进程添加到进程列表和哈希表中
+    bool intr_flag;
+    local_intr_save(intr_flag); // 禁用中断以保护临界区
+    {
+        proc->pid = get_pid(); // 为⼦进程分配⼀个唯⼀的进程ID
+        hash_proc(proc); // 将新进程添加到哈希表中
+        list_add(&proc_list, &(proc->list_link)); // 将新进程添加到进程列表中
+    }
+    local_intr_restore(intr_flag); // 恢复中断
+    //    6. 调用 wakeup_proc 将新进程的状态设置为 PROC_RUNNABLE，使其可运行
+    wakeup_proc(proc);
+    //    7. 使用子进程的 pid 设置返回值 ret
+    ret = proc->pid;
     
 
 fork_out:
-    return ret;
+    return ret;//函数的出口
 
-bad_fork_cleanup_kstack:
+bad_fork_cleanup_kstack://如果内核栈分配失败，释放内核栈
     put_kstack(proc);
-bad_fork_cleanup_proc:
+bad_fork_cleanup_proc://如果进程控制块分配失败，释放进程控制块
     kfree(proc);
     goto fork_out;
 }
