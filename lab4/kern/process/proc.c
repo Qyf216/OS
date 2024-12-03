@@ -103,10 +103,24 @@ alloc_proc(void) {
      *       char name[PROC_NAME_LEN + 1];               // Process name
      */
 
+        proc->state = PROC_UNINIT;                          
+        proc->pid = -1;                                      // 表示还未分配
+        proc->cr3 = boot_cr3;                                // 设置页目录基址
+        proc->runs = 0;                                      
+        proc->kstack = 0;                                    
+        proc->need_resched = 0;                              // 不需要重新调度
+        proc->parent = NULL;                                 // 父进程
+        proc->mm = NULL;                                     // 设置内存管理字段为空
+        memset(&(proc->context), 0, sizeof(struct context)); // 初始化上下文信息为0
+        proc->tf = NULL;                                     
+        proc->flags = 0;                                     
+        memset(proc->name, 0, PROC_NAME_LEN);                // 初始化进程名为0
+
 
     }
     return proc;
 }
+
 
 // set_proc_name - set the name of proc
 char *
