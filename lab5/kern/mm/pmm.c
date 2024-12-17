@@ -344,36 +344,37 @@ void exit_range(pde_t *pgdir, uintptr_t start, uintptr_t end) {
  *
  * CALL GRAPH: copy_mm-->dup_mmap-->copy_range
  */
+//将一个进程 A 内存中（起始地址，结束地址）范围内的内容复制到另一个进程 B 中
 int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
                bool share) {
-    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
-    assert(USER_ACCESS(start, end));
-    // copy content by page unit.
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0);//起始地址和结束地址按页面大小（PGSIZE）对齐，即都是页面大小的整数倍
+    assert(USER_ACCESS(start, end));//地址范围处于用户可访问的区域
+    // copy content by page unit.以页为单位复制内容
     do {
-        // call get_pte to find process A's pte according to the addr start
+        // call get_pte to find process A's pte according to the addr start根据起始地址 start 查找进程 A 的页表项（pte）
         pte_t *ptep = get_pte(from, start, 0), *nptep;
-        if (ptep == NULL) {
+        if (ptep == NULL) {// 如果页表项不存在，将起始地址向下对齐到下一个页表大小（PTSIZE）的边界，然后继续循环
             start = ROUNDDOWN(start + PTSIZE, PTSIZE);
             continue;
         }
         // call get_pte to find process B's pte according to the addr start. If
-        // pte is NULL, just alloc a PT
+        // pte is NULL, just alloc a PT根据起始地址 start 查找进程 B 的页表项（pte）。如果页表项为 NULL，则分配一个页表（PT）
         if (*ptep & PTE_V) {
             if ((nptep = get_pte(to, start, 1)) == NULL) {
                 return -E_NO_MEM;
             }
-            uint32_t perm = (*ptep & PTE_USER);
-            // get page from ptep
+            uint32_t perm = (*ptep & PTE_USER);//页面的访问权限相关信息
+            // get page from ptep从A页表项 ptep 获取对应的页面
             struct Page *page = pte2page(*ptep);
             // alloc a page for process B
             struct Page *npage = alloc_page();
             assert(page != NULL);
             assert(npage != NULL);
             int ret = 0;
-            /* LAB5:EXERCISE2 YOUR CODE
+            /* LAB5:EXERCISE2 2212895
              * replicate content of page to npage, build the map of phy addr of
              * nage with the linear addr start
-             *
+             *将页面 page 的内容复制到 npage 中，建立 npage 的物理地址与线性地址 start 的映射关系
              * Some Useful MACROs and DEFINEs, you can use them in below
              * implementation.
              * MACROs or Functions:
@@ -388,7 +389,14 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
              * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
              * (4) build the map of phy addr of  nage with the linear addr start
              */
-
+            //(1) 找到 src_kvaddr：页面 page 的内核虚拟地址
+            void *src_kvaddr = page2kva(page); 
+            //(2) 找到 dst_kvaddr：页面 npage 的内核虚拟地址
+            void *dst_kvaddr = page2kva(npage); 
+            //(3) 从 src_kvaddr 到 dst_kvaddr 进行内存复制，大小为 PGSIZE
+            memcpy(dst_kvaddr, src_kvaddr, PGSIZE); 
+            //(4) 将子进程的页表项加入到子进程的页表中
+            ret = page_insert(to, npage, start, perm); 
 
             assert(ret == 0);
         }

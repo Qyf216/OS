@@ -331,7 +331,7 @@ good_mm:
     mm_count_inc(mm);
     proc->mm = mm;
     proc->cr3 = PADDR(mm->pgdir);
-    return 0;
+    return 0; 
 bad_dup_cleanup_mmap:
     exit_mmap(mm);
     put_pgdir(mm);
@@ -369,7 +369,7 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
         goto fork_out;
     }
     ret = -E_NO_MEM;
-    //LAB4:EXERCISE2 YOUR CODE
+    //LAB4:EXERCISE2 2212895
     /*
      * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
      * MACROs or Functions:
@@ -403,6 +403,36 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
     *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
     *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
     */
+   //    1. 分配进程控制块：调用 alloc_proc 函数分配一个新的 proc_struct
+    if ((proc = alloc_proc()) == NULL)
+        goto fork_out;
+    // 更新1：当前进程的wait_state是0
+    current->wait_state = 0;
+
+    //    2. 分配内核栈：调用 setup_kstack 为子进程分配内核栈
+    proc->parent = current; // 设置⼦进程的⽗进程为当前进程
+    if (setup_kstack(proc))
+        goto bad_fork_cleanup_kstack;
+    //    3. 复制或共享内存管理信息：根据 clone_flags 调用 copy_mm 函数来决定是共享还是复制当前进程的内存管理结构 mm,这个实验中啥都没干
+    if (copy_mm(clone_flags, proc))
+        goto bad_fork_cleanup_proc;
+    //    4. 设置陷阱帧和上下文：调用 copy_thread设置⼦进程的tf和context
+    copy_thread(proc, stack, tf);
+    //    5. 将新进程添加到进程列表和哈希表中
+    bool intr_flag;
+    local_intr_save(intr_flag); // 禁用中断以保护临界区
+    {
+        proc->pid = get_pid(); // 为⼦进程分配⼀个唯⼀的进程ID
+        hash_proc(proc); // 将新进程添加到哈希表中
+        //list_add(&proc_list, &(proc->list_link)); // 将新进程添加到进程列表中
+        // 更新5：设置进程间的关系链接
+        set_links(proc);
+    }
+    local_intr_restore(intr_flag); // 恢复中断
+    //    6. 调用 wakeup_proc 将新进程的状态设置为 PROC_RUNNABLE，使其可运行
+    wakeup_proc(proc);
+    //    7. 使用子进程的 pid 设置返回值 ret
+    ret = proc->pid;
  
 fork_out:
     return ret;
